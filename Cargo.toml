@@ -1,0 +1,19 @@
+[package]
+name = "config-vault"
+version = "0.1.0"
+edition = "2021"
+description = "An extension for the config crate that allows loading configurations from HashiCorp Vault"
+authors = ["Eduardo González <edugonzalezvaq@gmail.com>"]
+license = "MIT"
+repository = "https://github.com/edugzlez/config-vault"
+documentation = "https://docs.rs/config-vault"
+readme = "README.md"
+keywords = ["config", "vault", "hashicorp", "secrets", "configuration"]
+categories = ["config", "api-bindings"]
+
+[dependencies]
+config = "0.15.11"
+serde = "1.0.219"
+reqwest = { version = "0.12.15", features = ["blocking", "json"] }
+url = "2.5.4"
+serde_json = "1.0.140"
