@@ -19,6 +19,7 @@
 //!         "hvs.EXAMPLE_TOKEN".to_string(),      // Vault token
 //!         "secret".to_string(),                 // KV mount name
 //!         "dev".to_string(),        // Secret path
+//!         KvVersion::V1, // KV Version, v2 requires path prefix data/ in URL // https://developer.hashicorp.com/vault/docs/secrets/kv/kv-v2/upgrade
 //!     );
 //!
 //!     Config::builder()
@@ -50,7 +51,8 @@ use url::Url;
 ///     "http://vault.example.com:8200".to_string(),
 ///     "my-token".to_string(),
 ///     "secret".to_string(),
-///     "dev".to_string()
+///     "dev".to_string(),
+///     KvVersion::V1
 /// );
 /// ```
 #[derive(Debug, Clone)]
@@ -59,6 +61,13 @@ pub struct VaultSource {
     vault_token: String,
     vault_mount: String,
     vault_path: String,
+    kv_version: KvVersion,
+}
+
+#[derive(Debug, Clone)]
+pub enum KvVersion {
+    V1 = 1,
+    V2,
 }
 
 impl VaultSource {
@@ -80,7 +89,8 @@ impl VaultSource {
     ///     "http://127.0.0.1:8200".to_string(),
     ///     "hvs.EXAMPLE_TOKEN".to_string(),
     ///     "secret".to_string(),
-    ///     "dev".to_string()
+    ///     "dev".to_string(),
+    ///     KvVersion::V1,
     /// );
     /// ```
     pub fn new(
@@ -88,13 +98,37 @@ impl VaultSource {
         vault_token: String,
         vault_mount: String,
         vault_path: String,
+        kv_version: KvVersion,
     ) -> Self {
         Self {
             vault_addr,
             vault_token,
             vault_mount,
             vault_path,
+            kv_version,
         }
+    }
+
+    /// Builds the URL for Vault's KV1 engine read API.
+    ///
+    /// This function takes the base address of Vault and builds the complete URL
+    /// to access the read API of the KV1 engine with the specified path.
+    ///
+    /// # Returns
+    ///
+    /// * `Result<Url, ConfigError>` - The constructed URL or an error if the address is invalid
+    fn build_kv1_read_url(&self) -> Result<Url, ConfigError> {
+        let api_path = format!("v1/{}/{}", self.vault_mount, self.vault_path);
+
+        let mut url = Url::parse(&self.vault_addr)
+            .map_err(|e| ConfigError::Message(format!("Invalid Vault address URL: {}", e)))?;
+
+        url.path_segments_mut()
+            .map_err(|_| ConfigError::Message("Vault address URL cannot be a base".into()))?
+            .pop_if_empty() // Remove trailing slash if any
+            .extend(api_path.split('/')); // Add the API path segments
+
+        Ok(url)
     }
 
     /// Builds the URL for Vault's KV2 engine read API.
@@ -135,7 +169,14 @@ impl Source for VaultSource {
     /// * `Result<Map<String, Value>, ConfigError>` - A map with configuration values
     ///   or an error if the request fails or the response format is not as expected.
     fn collect(&self) -> Result<Map<String, Value>, ConfigError> {
-        let url = self.build_kv2_read_url()?;
+        let url: Url;
+        if let KvVersion::V1 = self.kv_version {
+            url = self.build_kv1_read_url()?;
+        }
+        else {
+            url = self.build_kv2_read_url()?;
+        }
+
         let client = Client::new();
         let response = client
             .get(url)
@@ -148,11 +189,21 @@ impl Source for VaultSource {
                 .json::<JsonValue>()
                 .map_err(|e| ConfigError::Foreign(Box::new(e)))?;
 
-            let json_obj = raw
+            let json_obj: &serde_json::Map<String, serde_json::value::Value>;
+
+            if let KvVersion::V1 = self.kv_version {
+                json_obj = raw
+                .get("data")
+                .and_then(|x| x.as_object())
+                .unwrap();
+            }
+            else {
+                json_obj = raw
                 .get("data")
                 .and_then(|x| x.get("data"))
                 .and_then(|x| x.as_object())
                 .unwrap();
+            }
 
             let mut secret = HashMap::new();
             for (k, v) in json_obj {
@@ -162,7 +213,7 @@ impl Source for VaultSource {
             Ok(secret)
         } else {
             Err(ConfigError::Message(format!(
-                "Failed to fetch secret from Vault: {}",
+                "Failed to fetch secret from Vault (wrong kv version?): {}",
                 response.status()
             )))
         }
