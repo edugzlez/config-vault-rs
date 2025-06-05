@@ -68,16 +68,14 @@ pub enum KvVersion {
     V2,
 }
 
-/*
 impl KvVersion {
-    fn get_url(&self, addr: &str, mount: &str, path: &str) -> Url {
+    fn get_api_path(&self, mount: &str, path: &str) -> String {
          match self {
-              KvVersion::V1 => ...,
-              _ => ...
+              KvVersion::V1 => format!("v1/{}/{}", mount, path),
+              _ => format!("v1/{}/data/{}", mount, path)
          }
     }
 }
-*/
 
 impl VaultSource {
     /// Creates a new instance of `VaultSource`.
@@ -116,6 +114,42 @@ impl VaultSource {
         }        
     }
 
+    /// Creates a new instance of `VaultSource` with kv_version V1
+    ///
+    /// # Parameters
+    ///
+    /// * `vault_addr` - Complete URL of the Vault server (e.g. "http://127.0.0.1:8200")
+    /// * `vault_token` - Authentication token for Vault
+    /// * `vault_mount` - Name of the KV engine mount (e.g. "secret")
+    /// * `vault_path` - Path to the secret within the mount (e.g. "dev")
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use config_vault::VaultSource;
+    ///
+    /// let source = VaultSource::new_v1(
+    ///     "http://127.0.0.1:8200".to_string(),
+    ///     "hvs.EXAMPLE_TOKEN".to_string(),
+    ///     "secret".to_string(),
+    ///     "dev".to_string(),
+    /// );
+    /// ```
+    pub fn new_v1( 
+        vault_addr: String,
+        vault_token: String,
+        vault_mount: String,
+        vault_path: String,
+    ) -> Self {
+         Self {
+             vault_addr,
+             vault_token,
+             vault_mount,
+             vault_path,
+             kv_version: KvVersion::V1,
+        }        
+    }
+
     
     /// Changes the KvVersion
     ///
@@ -127,7 +161,7 @@ impl VaultSource {
     }
 
 
-    /// Builds the URL for Vault's KV1 engine read API.
+    /// Builds the URL for Vault's KV1/KV2 engine read API.
     ///
     /// This function takes the base address of Vault and builds the complete URL
     /// to access the read API of the KV1 engine with the specified path.
@@ -135,8 +169,8 @@ impl VaultSource {
     /// # Returns
     ///
     /// * `Result<Url, ConfigError>` - The constructed URL or an error if the address is invalid
-    fn build_kv1_read_url(&self) -> Result<Url, ConfigError> {
-        let api_path = format!("v1/{}/{}", self.vault_mount, self.vault_path);
+    fn build_kv_read_url(&self) -> Result<Url, ConfigError> {
+        let api_path = self.kv_version.get_api_path(&self.vault_mount, &self.vault_path);
 
         let mut url = Url::parse(&self.vault_addr)
             .map_err(|e| ConfigError::Message(format!("Invalid Vault address URL: {}", e)))?;
@@ -149,27 +183,6 @@ impl VaultSource {
         Ok(url)
     }
 
-    /// Builds the URL for Vault's KV2 engine read API.
-    ///
-    /// This function takes the base address of Vault and builds the complete URL
-    /// to access the read API of the KV2 engine with the specified path.
-    ///
-    /// # Returns
-    ///
-    /// * `Result<Url, ConfigError>` - The constructed URL or an error if the address is invalid
-    fn build_kv2_read_url(&self) -> Result<Url, ConfigError> {
-        let api_path = format!("v1/{}/data/{}", self.vault_mount, self.vault_path);
-
-        let mut url = Url::parse(&self.vault_addr)
-            .map_err(|e| ConfigError::Message(format!("Invalid Vault address URL: {}", e)))?;
-
-        url.path_segments_mut()
-            .map_err(|_| ConfigError::Message("Vault address URL cannot be a base".into()))?
-            .pop_if_empty() // Remove trailing slash if any
-            .extend(api_path.split('/')); // Add the API path segments
-
-        Ok(url)
-    }
 }
 
 impl Source for VaultSource {
@@ -187,10 +200,7 @@ impl Source for VaultSource {
     /// * `Result<Map<String, Value>, ConfigError>` - A map with configuration values
     ///   or an error if the request fails or the response format is not as expected.
     fn collect(&self) -> Result<Map<String, Value>, ConfigError> {
-        let url = match self.kv_version {
-            KvVersion::V1 => self.build_kv1_read_url()?,
-            _ => self.build_kv2_read_url()?,
-        };
+        let url = self.build_kv_read_url()?;
 
         let client = Client::new();
         let response = client
