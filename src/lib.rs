@@ -19,7 +19,6 @@
 //!         "hvs.EXAMPLE_TOKEN".to_string(),      // Vault token
 //!         "secret".to_string(),                 // KV mount name
 //!         "dev".to_string(),        // Secret path
-//!         KvVersion::V1, // KV Version, v2 requires path prefix data/ in URL // https://developer.hashicorp.com/vault/docs/secrets/kv/kv-v2/upgrade
 //!     );
 //!
 //!     Config::builder()
@@ -52,7 +51,6 @@ use url::Url;
 ///     "my-token".to_string(),
 ///     "secret".to_string(),
 ///     "dev".to_string(),
-///     KvVersion::V1
 /// );
 /// ```
 #[derive(Debug, Clone)]
@@ -64,11 +62,22 @@ pub struct VaultSource {
     kv_version: KvVersion,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum KvVersion {
     V1 = 1,
     V2,
 }
+
+/*
+impl KvVersion {
+    fn get_url(&self, addr: &str, mount: &str, path: &str) -> Url {
+         match self {
+              KvVersion::V1 => ...,
+              _ => ...
+         }
+    }
+}
+*/
 
 impl VaultSource {
     /// Creates a new instance of `VaultSource`.
@@ -90,7 +99,6 @@ impl VaultSource {
     ///     "hvs.EXAMPLE_TOKEN".to_string(),
     ///     "secret".to_string(),
     ///     "dev".to_string(),
-    ///     KvVersion::V1,
     /// );
     /// ```
     pub fn new(
@@ -98,16 +106,26 @@ impl VaultSource {
         vault_token: String,
         vault_mount: String,
         vault_path: String,
-        kv_version: KvVersion,
     ) -> Self {
         Self {
             vault_addr,
             vault_token,
             vault_mount,
             vault_path,
-            kv_version,
-        }
+            kv_version: KvVersion::V2,
+        }        
     }
+
+    
+    /// Changes the KvVersion
+    ///
+    /// This function takes the target KvVersion and replaces the existing one.
+    ///
+    pub fn set_kv_version(&mut self, kv_version: KvVersion)
+    {
+        self.kv_version = kv_version;
+    }
+
 
     /// Builds the URL for Vault's KV1 engine read API.
     ///
@@ -169,13 +187,10 @@ impl Source for VaultSource {
     /// * `Result<Map<String, Value>, ConfigError>` - A map with configuration values
     ///   or an error if the request fails or the response format is not as expected.
     fn collect(&self) -> Result<Map<String, Value>, ConfigError> {
-        let url: Url;
-        if let KvVersion::V1 = self.kv_version {
-            url = self.build_kv1_read_url()?;
-        }
-        else {
-            url = self.build_kv2_read_url()?;
-        }
+        let url = match self.kv_version {
+            KvVersion::V1 => self.build_kv1_read_url()?,
+            _ => self.build_kv2_read_url()?,
+        };
 
         let client = Client::new();
         let response = client
@@ -189,21 +204,11 @@ impl Source for VaultSource {
                 .json::<JsonValue>()
                 .map_err(|e| ConfigError::Foreign(Box::new(e)))?;
 
-            let json_obj: &serde_json::Map<String, serde_json::value::Value>;
-
-            if let KvVersion::V1 = self.kv_version {
-                json_obj = raw
-                .get("data")
-                .and_then(|x| x.as_object())
-                .unwrap();
-            }
-            else {
-                json_obj = raw
-                .get("data")
-                .and_then(|x| x.get("data"))
-                .and_then(|x| x.as_object())
-                .unwrap();
-            }
+            let json_obj = raw
+            .get("data")
+            .and_then(|x| { if self.kv_version == KvVersion::V2 { x.get("data")} else { Some(x) } } )
+            .and_then(|x| x.as_object())
+            .unwrap();
 
             let mut secret = HashMap::new();
             for (k, v) in json_obj {
