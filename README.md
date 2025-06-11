@@ -34,8 +34,9 @@ fn load_config() -> Result<Config, ConfigError> {
         "hvs.EXAMPLE_TOKEN".to_string(),      // Vault token
         "secret".to_string(),                 // KV mount name
         "dev".to_string(),        // Secret path
-        KvVersion::V2, // KV Version
     );
+
+    vault_source.set_kv_version(KvVersion::V1); // change kv_version to KV1 if required
 
     // Build configuration incorporating Vault and other sources
     Config::builder()
@@ -64,7 +65,7 @@ For more information, check the [complete documentation](https://docs.rs/config-
 ## Requirements
 
 - Rust 1.60 or higher
-- An accessible HashiCorp Vault server or compatible like https://github.com/Tongsuo-Project/RustyVault
+- An accessible HashiCorp Vault server or compatible like [RustyVault](https://github.com/Tongsuo-Project/RustyVault)
 
 ## License
 
