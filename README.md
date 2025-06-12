@@ -9,7 +9,7 @@ An extension for the `config` crate that allows loading configurations from Hash
 ## Features
 
 - Integration with the `config` crate through a custom `VaultSource`
-- Support for HashiCorp Vault's KV2 engine
+- Support for HashiCorp Vault's KV1 & KV2 engine
 - Secure loading of secrets through Vault's REST API
 
 ## Installation
@@ -35,6 +35,8 @@ fn load_config() -> Result<Config, ConfigError> {
         "secret".to_string(),                 // KV mount name
         "dev".to_string(),        // Secret path
     );
+
+    vault_source.set_kv_version(KvVersion::V1); // change kv_version to KV1 if required
 
     // Build configuration incorporating Vault and other sources
     Config::builder()
@@ -63,7 +65,7 @@ For more information, check the [complete documentation](https://docs.rs/config-
 ## Requirements
 
 - Rust 1.60 or higher
-- An accessible HashiCorp Vault server
+- An accessible HashiCorp Vault server or compatible like [RustyVault](https://github.com/Tongsuo-Project/RustyVault)
 
 ## License
 

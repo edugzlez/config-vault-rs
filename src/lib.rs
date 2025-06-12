@@ -50,7 +50,7 @@ use url::Url;
 ///     "http://vault.example.com:8200".to_string(),
 ///     "my-token".to_string(),
 ///     "secret".to_string(),
-///     "dev".to_string()
+///     "dev".to_string(),
 /// );
 /// ```
 #[derive(Debug, Clone)]
@@ -59,6 +59,22 @@ pub struct VaultSource {
     vault_token: String,
     vault_mount: String,
     vault_path: String,
+    kv_version: KvVersion,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum KvVersion {
+    V1 = 1,
+    V2,
+}
+
+impl KvVersion {
+    fn get_api_path(&self, mount: &str, path: &str) -> String {
+         match self {
+              KvVersion::V1 => format!("v1/{}/{}", mount, path),
+              _ => format!("v1/{}/data/{}", mount, path)
+         }
+    }
 }
 
 impl VaultSource {
@@ -80,7 +96,7 @@ impl VaultSource {
     ///     "http://127.0.0.1:8200".to_string(),
     ///     "hvs.EXAMPLE_TOKEN".to_string(),
     ///     "secret".to_string(),
-    ///     "dev".to_string()
+    ///     "dev".to_string(),
     /// );
     /// ```
     pub fn new(
@@ -94,19 +110,67 @@ impl VaultSource {
             vault_token,
             vault_mount,
             vault_path,
-        }
+            kv_version: KvVersion::V2,
+        }        
     }
 
-    /// Builds the URL for Vault's KV2 engine read API.
+    /// Creates a new instance of `VaultSource` with kv_version V1
+    ///
+    /// # Parameters
+    ///
+    /// * `vault_addr` - Complete URL of the Vault server (e.g. "http://127.0.0.1:8200")
+    /// * `vault_token` - Authentication token for Vault
+    /// * `vault_mount` - Name of the KV engine mount (e.g. "secret")
+    /// * `vault_path` - Path to the secret within the mount (e.g. "dev")
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use config_vault::VaultSource;
+    ///
+    /// let source = VaultSource::new_v1(
+    ///     "http://127.0.0.1:8200".to_string(),
+    ///     "hvs.EXAMPLE_TOKEN".to_string(),
+    ///     "secret".to_string(),
+    ///     "dev".to_string(),
+    /// );
+    /// ```
+    pub fn new_v1( 
+        vault_addr: String,
+        vault_token: String,
+        vault_mount: String,
+        vault_path: String,
+    ) -> Self {
+         Self {
+             vault_addr,
+             vault_token,
+             vault_mount,
+             vault_path,
+             kv_version: KvVersion::V1,
+        }        
+    }
+
+    
+    /// Changes the KvVersion
+    ///
+    /// This function takes the target KvVersion and replaces the existing one.
+    ///
+    pub fn set_kv_version(&mut self, kv_version: KvVersion)
+    {
+        self.kv_version = kv_version;
+    }
+
+
+    /// Builds the URL for Vault's KV1/KV2 engine read API.
     ///
     /// This function takes the base address of Vault and builds the complete URL
-    /// to access the read API of the KV2 engine with the specified path.
+    /// to access the read API of the KV1 engine with the specified path.
     ///
     /// # Returns
     ///
     /// * `Result<Url, ConfigError>` - The constructed URL or an error if the address is invalid
-    fn build_kv2_read_url(&self) -> Result<Url, ConfigError> {
-        let api_path = format!("v1/{}/data/{}", self.vault_mount, self.vault_path);
+    fn build_kv_read_url(&self) -> Result<Url, ConfigError> {
+        let api_path = self.kv_version.get_api_path(&self.vault_mount, &self.vault_path);
 
         let mut url = Url::parse(&self.vault_addr)
             .map_err(|e| ConfigError::Message(format!("Invalid Vault address URL: {}", e)))?;
@@ -118,6 +182,7 @@ impl VaultSource {
 
         Ok(url)
     }
+
 }
 
 impl Source for VaultSource {
@@ -135,7 +200,8 @@ impl Source for VaultSource {
     /// * `Result<Map<String, Value>, ConfigError>` - A map with configuration values
     ///   or an error if the request fails or the response format is not as expected.
     fn collect(&self) -> Result<Map<String, Value>, ConfigError> {
-        let url = self.build_kv2_read_url()?;
+        let url = self.build_kv_read_url()?;
+
         let client = Client::new();
         let response = client
             .get(url)
@@ -149,10 +215,10 @@ impl Source for VaultSource {
                 .map_err(|e| ConfigError::Foreign(Box::new(e)))?;
 
             let json_obj = raw
-                .get("data")
-                .and_then(|x| x.get("data"))
-                .and_then(|x| x.as_object())
-                .unwrap();
+            .get("data")
+            .and_then(|x| { if self.kv_version == KvVersion::V2 { x.get("data")} else { Some(x) } } )
+            .and_then(|x| x.as_object())
+            .unwrap();
 
             let mut secret = HashMap::new();
             for (k, v) in json_obj {
@@ -162,7 +228,7 @@ impl Source for VaultSource {
             Ok(secret)
         } else {
             Err(ConfigError::Message(format!(
-                "Failed to fetch secret from Vault: {}",
+                "Failed to fetch secret from Vault (wrong kv version?): {}",
                 response.status()
             )))
         }
