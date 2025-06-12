@@ -27,6 +27,19 @@
 //!         .build()
 //! }
 //! ```
+//!
+//! If you want to use the KV1 engine, you can use the `new_v1` method instead of `new`:
+//!
+//! ```
+//! use config_vault::VaultSource;
+//!
+//! let vault_source = VaultSource::new_v1(
+//!         "http://127.0.0.1:8200".to_string(),  // Vault address
+//!         "hvs.EXAMPLE_TOKEN".to_string(),      // Vault token
+//!         "secret".to_string(),                 // KV mount name
+//!         "dev".to_string(),        // Secret path
+//! );
+//! ```
 
 use std::collections::HashMap;
 
@@ -70,10 +83,10 @@ pub enum KvVersion {
 
 impl KvVersion {
     fn get_api_path(&self, mount: &str, path: &str) -> String {
-         match self {
-              KvVersion::V1 => format!("v1/{}/{}", mount, path),
-              _ => format!("v1/{}/data/{}", mount, path)
-         }
+        match self {
+            KvVersion::V1 => format!("v1/{}/{}", mount, path),
+            _ => format!("v1/{}/data/{}", mount, path),
+        }
     }
 }
 
@@ -111,7 +124,7 @@ impl VaultSource {
             vault_mount,
             vault_path,
             kv_version: KvVersion::V2,
-        }        
+        }
     }
 
     /// Creates a new instance of `VaultSource` with kv_version V1
@@ -135,31 +148,28 @@ impl VaultSource {
     ///     "dev".to_string(),
     /// );
     /// ```
-    pub fn new_v1( 
+    pub fn new_v1(
         vault_addr: String,
         vault_token: String,
         vault_mount: String,
         vault_path: String,
     ) -> Self {
-         Self {
-             vault_addr,
-             vault_token,
-             vault_mount,
-             vault_path,
-             kv_version: KvVersion::V1,
-        }        
+        Self {
+            vault_addr,
+            vault_token,
+            vault_mount,
+            vault_path,
+            kv_version: KvVersion::V1,
+        }
     }
 
-    
     /// Changes the KvVersion
     ///
     /// This function takes the target KvVersion and replaces the existing one.
     ///
-    pub fn set_kv_version(&mut self, kv_version: KvVersion)
-    {
+    pub fn set_kv_version(&mut self, kv_version: KvVersion) {
         self.kv_version = kv_version;
     }
-
 
     /// Builds the URL for Vault's KV1/KV2 engine read API.
     ///
@@ -170,7 +180,9 @@ impl VaultSource {
     ///
     /// * `Result<Url, ConfigError>` - The constructed URL or an error if the address is invalid
     fn build_kv_read_url(&self) -> Result<Url, ConfigError> {
-        let api_path = self.kv_version.get_api_path(&self.vault_mount, &self.vault_path);
+        let api_path = self
+            .kv_version
+            .get_api_path(&self.vault_mount, &self.vault_path);
 
         let mut url = Url::parse(&self.vault_addr)
             .map_err(|e| ConfigError::Message(format!("Invalid Vault address URL: {}", e)))?;
@@ -182,7 +194,6 @@ impl VaultSource {
 
         Ok(url)
     }
-
 }
 
 impl Source for VaultSource {
@@ -215,10 +226,16 @@ impl Source for VaultSource {
                 .map_err(|e| ConfigError::Foreign(Box::new(e)))?;
 
             let json_obj = raw
-            .get("data")
-            .and_then(|x| { if self.kv_version == KvVersion::V2 { x.get("data")} else { Some(x) } } )
-            .and_then(|x| x.as_object())
-            .unwrap();
+                .get("data")
+                .and_then(|x| {
+                    if self.kv_version == KvVersion::V2 {
+                        x.get("data")
+                    } else {
+                        Some(x)
+                    }
+                })
+                .and_then(|x| x.as_object())
+                .unwrap();
 
             let mut secret = HashMap::new();
             for (k, v) in json_obj {

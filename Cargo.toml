@@ -1,6 +1,6 @@
 [package]
 name = "config-vault"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "An extension for the config crate that allows loading configurations from HashiCorp Vault"
 authors = ["Eduardo González <edugonzalezvaq@gmail.com>"]
